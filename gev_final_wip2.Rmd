@@ -1,0 +1,205 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, results="HIDE"}
+library(lubridate)
+library(dplyr)
+library(FAdist)
+library(extRemes)
+library(goftest)
+library(tidyverse)
+require(gridExtra)
+options(scipen = 999)
+set.seed(1)
+```
+
+```{r}
+#set.seed(1)
+# assign parameters
+betuh <- 0.15
+alphuh <- 0.1
+```
+
+```{r}
+# sequence to use in ks test
+x_seq <- seq(0, max(rllog(36500, betuh, alphuh))+1, by = .05)
+#llog_cdf<- pllog(x_seq, betuh, alphuh)
+#pllog(qgev(.95, shape=a_shape,scale=a_scale,location=a_loc), betuh, alphuh)
+# empirical CDFs of max order stats
+cdf_maxostat_annual <- round(pllog(x_seq, betuh, alphuh)^365, 10)
+cdf_maxostat_month <- round(pllog(x_seq, betuh, alphuh)^30, 10)
+cdf_maxostat_week <- round(pllog(x_seq, betuh, alphuh)^7, 10)
+```
+
+```{r}
+# 100 years of simulation data, store info from each model in outside DF
+store_annual <- matrix(0, nrow = 500, ncol = 12)
+store_month <- matrix(0, nrow = 500, ncol = 12)
+store_week <- matrix(0, nrow = 500, ncol = 12)
+k = 1
+for (i in 1:500){
+  sim_val <- rllog(365, betuh, alphuh)
+  for (j in 1:99) {
+    set.seed((10*i)+j)
+    sim_val <- append(sim_val, rllog(365, .15, .1))
+  }
+  yrsam <- data.frame(sim_val)
+  yrsam$sim_date <- as.Date(as.numeric(row.names(yrsam)) -1, origin = "1900-01-01")
+  yrsam$sim_date <- ymd(yrsam$sim_date)
+  
+  ## block maxima
+  year_block <- yrsam %>% 
+    group_by(yr = year(sim_date)) %>% 
+    summarize(block.max = max(sim_val))
+  
+  #calculate annual GEV
+  gev_annual <- fevd(year_block$block.max,  units = "deg C", time.units = "years")
+  gev_annual_summary <- summary(gev_annual)
+  # seq of vals to use for ks test, using CDF
+  pgev_a <- round(FAdist::pgev(x_seq,
+                       shape=gev_annual_summary$par[[3]],
+                       scale=gev_annual_summary$par[[2]],
+                       location=gev_annual_summary$par[[1]]), 10)
+  
+  store_annual[i,] <- c(gev_annual$results$par[[1]],
+                         gev_annual_summary$se.theta[[1]],
+                         gev_annual$results$par[[2]], 
+                         gev_annual_summary$se.theta[[2]],
+                         gev_annual$results$par[[3]], 
+                         gev_annual_summary$se.theta[[3]],
+                         gev_annual_summary$AIC,
+                         return.level(gev_annual, do.ci = TRUE)[2,1],
+                         return.level(gev_annual, do.ci = TRUE)[2,2],
+                         return.level(gev_annual, do.ci = TRUE)[2,3],
+                         unname(ks.test(pgev_a, cdf_maxostat_annual)[[1]]),
+                         unname(ks.test(pgev_a, cdf_maxostat_annual)[[2]]))
+  
+  
+  month_block <- yrsam %>% 
+    group_by(yr = year(sim_date), mnth = month(sim_date)) %>% 
+    summarize(block.max = max(sim_val))
+  # calculate the GEV
+  gev_month <- fevd(month_block$block.max,  units = "deg C", time.units = "months")
+  gev_month_summary <- summary(gev_month)
+  # seq of vals to use for ks test, using CDF
+  pgev_a <- round(FAdist::pgev(x_seq,
+                       shape=gev_month_summary$par[[3]],
+                       scale=gev_month_summary$par[[2]],
+                       location=gev_month_summary$par[[1]]), 10)
+  
+  store_month[i,] <- c(gev_month$results$par[[1]],
+                         gev_month_summary$se.theta[[1]],
+                         gev_month$results$par[[2]], 
+                         gev_month_summary$se.theta[[2]],
+                         gev_month$results$par[[3]], 
+                         gev_month_summary$se.theta[[3]],
+                         gev_month_summary$AIC,
+                         return.level(gev_month, do.ci = TRUE)[2,1],
+                         return.level(gev_month, do.ci = TRUE)[2,2],
+                         return.level(gev_month, do.ci = TRUE)[2,3],
+                         unname(ks.test(pgev_a, cdf_maxostat_month)[[1]]),
+                         unname(ks.test(pgev_a, cdf_maxostat_month)[[2]]))
+  
+  week_block <- yrsam %>% 
+    group_by(yr = year(sim_date), mnth = month(sim_date), wk = week(sim_date)) %>% 
+    summarize(block.max = max(sim_val))
+  gev_week <- fevd(week_block$block.max,  units = "deg C", time.units = "52/year")
+  gev_week_summary <- summary(gev_week)
+  # seq of vals to use for ks test, using CDF
+  pgev_a <- round(FAdist::pgev(x_seq,
+                       shape=gev_week_summary$par[[3]],
+                       scale=gev_week_summary$par[[2]],
+                       location=gev_week_summary$par[[1]]), 10)
+  
+  store_week[i,] <- c(gev_week$results$par[[1]],
+                         gev_week_summary$se.theta[[1]],
+                         gev_week$results$par[[2]], 
+                         gev_week_summary$se.theta[[2]],
+                         gev_week$results$par[[3]], 
+                         gev_week_summary$se.theta[[3]],
+                         gev_week_summary$AIC,
+                         return.level(gev_week, do.ci = TRUE)[2,1],
+                         return.level(gev_week, do.ci = TRUE)[2,2],
+                         return.level(gev_week, do.ci = TRUE)[2,3],
+                         unname(ks.test(pgev_a, cdf_maxostat_week)[[1]]),
+                         unname(ks.test(pgev_a, cdf_maxostat_week)[[2]]))
+}
+```
+
+
+distributions are not the same
+"test of equality of distribution"
+proportion of simulations that are different
+related to power and type 1 error
+how close is asympotic 
+# clean up output
+```{r}
+store_annual_df <- data.frame(store_annual)
+colnames(store_annual_df) <- c("location", "loc_se", "scale", "scale_se", "shape","shape_se","AIC", "20low", "20est", "20hi", "ks_s", "ks_p")
+store_annual_df$block <- "annual"
+store_month_df <- data.frame(store_month)
+colnames(store_month_df) <- c("location", "loc_se", "scale", "scale_se", "shape","shape_se","AIC", "20low", "20est", "20hi", "ks_s", "ks_p")
+store_month_df$block <- "month"
+store_week_df <- data.frame(store_week)
+colnames(store_week_df) <- c("location", "loc_se", "scale", "scale_se", "shape","shape_se","AIC", "20low", "20est", "20hi", "ks_s", "ks_p")
+store_week_df$block <- "week"
+```
+
+```{r}
+sim500 <- ggplot(yrsam, aes(sim_date, sim_val)) + geom_point() + labs(x = "Simulation Date", y = "Simulation Value", title = "Sample Observations")
+sim_500den <- ggplot(yrsam, aes(sim_val)) + geom_density() + labs(x = "Simulation Value", y = "density", title = "Sample Density")
+grid.arrange(sim500, sim_500den, ncol = 2)
+```
+
+```{r}
+# order stat CDFs
+max_ostat_df <- data.frame(cbind(x_seq, cdf_maxostat_annual, cdf_maxostat_month, cdf_maxostat_week))
+names(max_ostat_df) <- c("val", "annual_ostat", "month_ostat", "week_ostat")
+
+cdf_a <- ggplot(max_ostat_df, aes(val, annual_ostat)) + geom_line() + labs(x = "[F(x)]^n", y = "quantile", title = "CDF of Maximum Order Statistic", subtitle = "Block Size: N = Annual")
+cdf_m <- ggplot(max_ostat_df, aes(val, month_ostat)) + geom_line() + labs(x = "[F(x)]^n", y = "quantile", title = "CDF of Maximum Order Statistic", subtitle = "Block Size: N = Month")
+cdf_w <- ggplot(max_ostat_df, aes(val, week_ostat)) + geom_line() + labs(x = "[F(x)]^n", y = "quantile", title = "CDF of Maximum Order Statistic", subtitle = "Block Size: N = Week")
+grid.arrange(cdf_a, cdf_m, cdf_w, ncol=1)
+
+ostat_long <- max_ostat_df %>% pivot_longer(-val, names_to = "block", values_to = "quant")
+```
+
+Create "average" distributions
+```{r}
+a_avg <- round(FAdist::pgev(x_seq,shape=mean(store_annual_df$shape),scale=mean(store_annual_df$scale),location=mean(store_annual_df$location)), 10)
+a_avg[1:4] <- 0.0
+m_avg <- round(FAdist::pgev(x_seq,shape=mean(store_month_df$shape), scale=mean(store_month_df$scale), location=mean(store_month_df$location)), 10)
+w_avg <- round(FAdist::pgev(x_seq,shape=mean(store_week_df$shape),scale=mean(store_week_df$scale),location=mean(store_week_df$location)), 10)
+avg_cdf <- data.frame(cbind(x_seq, a_avg, m_avg, w_avg))
+names(avg_cdf) <- c("val", "annual_gev", "month_gev", "week_gev")
+
+# put into ggplot format
+avgcdf_long <- avg_cdf %>% pivot_longer(-val, names_to = "block", values_to = "quant")
+cdfs <- rbind(ostat_long, avgcdf_long)
+
+ggplot(cdfs, aes(val, quant)) + geom_line(aes(color = block)) + labs(x = "value", y = "quantile", title = "CDF of Maximum Order Statistics and GEV distributions")
+
+an1 <- ggplot(filter(cdfs, block == "annual_gev" | block == "annual_ostat") , aes(val, quant)) + geom_line(aes(color = block)) + labs(x = "value", y = "quantile", title = "Annual Blocks")
+
+m1 <- ggplot(filter(cdfs, block == "month_gev" | block == "month_ostat") , aes(val, quant)) + geom_line(aes(color = block)) + labs(x = "value", y = "quantile", title = "Month Blocks")
+
+w1 <- ggplot(filter(cdfs, block == "week_gev" | block == "week_ostat") , aes(val, quant)) + geom_line(aes(color = block)) + labs(x = "value", y = "quantile", title = "Week Blocks")
+
+grid.arrange(an1, m1, w1)
+```
+
+```{r}
+big <- rbind(store_annual_df, store_week_df, store_month_df)
+
+# p-values
+big %>% group_by(block) %>% filter(ks_p > 0.05) %>% summarize(n())
+pval_summ <- cbind(summary(store_annual_df$ks_p), summary(store_month_df$ks_p), summary(store_week_df$ks_p))
+colnames(pval_summ) <- c("Annual", "Month", "Week")
+View(round(pval_summ, 5))
+```
+
+
+
+
